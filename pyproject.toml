@@ -19,7 +19,8 @@ dependencies = [
     "altair (==4)",
     "streamlit (>=1.42.1,<2.0.0)",
     "duckduckgo-search (>=7.4.3,<8.0.0)",
-    "fastbook (>=0.0.29,<0.0.30)"
+    "fastbook (>=0.0.29,<0.0.30)",
+    "python-dotenv (>=1.0.1,<2.0.0)"
 ]
 
 

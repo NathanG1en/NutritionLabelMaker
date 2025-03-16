@@ -1,1 +1,1 @@
-from .agents.food_search_agent import FoodSearchAgent
+from .agents.food_searcher import FoodSearcher

@@ -1,6 +1,38 @@
+# import streamlit as st
+# import pandas as pd
+# from agents.nutrition_agent import NutritionAgent
+#
+# # Initialize Agent
+# if "nutrition_agent" not in st.session_state:
+#     st.session_state.nutrition_agent = NutritionAgent()
+#
+# # App UI
+# st.title("🍎 AI-Powered Nutrition Label Generator")
+#
+# # Food Input
+# food_input = st.text_area("Enter a Food Item:", placeholder="e.g., Chicken Breast, Almonds, Oatmeal")
+#
+# if st.button("Generate Nutrition Label"):
+#     if not food_input:
+#         st.error("Please enter a food item.")
+#     else:
+#         # Process query
+#         with st.spinner("Fetching nutrition data..."):
+#             messages = [HumanMessage(content=food_input)]
+#             result = st.session_state.nutrition_agent.graph.invoke({"messages": messages})
+#
+#         # Display Results
+#         st.subheader("🏷️ Generated Nutrition Label")
+#         st.write(result["messages"][-1].content)
+#
+#         # Option to Download
+#         csv = pd.DataFrame([result["messages"][-1].content]).to_csv(index=False).encode("utf-8")
+#         st.download_button(label="📥 Download Nutrition Data as CSV", data=csv, file_name="nutrition_label.csv", mime="text/csv")
+#
+
 import streamlit as st
 import pandas as pd
-from agents.food_search_agent import FoodSearchAgent
+from agents.food_searcher import FoodSearcher
 
 # App Title
 st.title("🍎 AI-Powered USDA Nutrition Label Generator")
@@ -14,7 +46,7 @@ alpha = st.sidebar.slider("SBERT-Fuzzy Matching Weight (α)", 0.0, 1.0, 0.5, 0.0
 
 # Initialize FoodSearchAgent
 if api_key:
-    agent = FoodSearchAgent(api_key)
+    agent = FoodSearcher(api_key)
 else:
     st.warning("Please enter your USDA API key.")
     st.stop()
