@@ -82,4 +82,4 @@ def draw_nutrition_label_fallback(data, filename='label_output_fallback.png'):
     return f"images/{filename}"
 
 # Generate the fallback label image
-draw_nutrition_label_fallback(nutrition_data)
+    draw_nutrition_label_fallback(nutrition_data)

@@ -138,7 +138,7 @@ class FoodSearcher:
         return pd.DataFrame(results)
 
 
-    def nutrition_retrieval(self, fdcIDs):
+    def nutrition_retrieval(self, fdcIDs, description = 'ingredient'):
         """
         Retrieve nutritional data for a list of FDCIDs.
         """
@@ -158,6 +158,7 @@ class FoodSearcher:
                 parsed = response.json()
                 nutrients = {key: 0 for key in nutrient_list}
                 nutrients['fdcID'] = fdcID
+                nutrients['name'] = description
 
                 for nutrient in parsed.get('foodNutrients', []):
                     id_to_key = {
