@@ -145,8 +145,8 @@ class FoodSearcher:
         nutrient_container = []
         nutrient_list = [
             'trans_fat', 'sat_fat', 'cholesterol', 'sodium', 'carbs',
-            'fiber', 'sugars', 'protein', 'vit_a', 'vit_c',
-            'calcium', 'iron', 'energy', 'fdcID'
+            'fiber', 'sugars', 'added_sugars', 'protein', 'vit_a', 'vit_c', 'vit_d',
+            'calcium', 'iron', 'potassium', 'energy', 'fdcID'
         ]
 
         for fdcID in fdcIDs:
@@ -163,10 +163,21 @@ class FoodSearcher:
 
                 for nutrient in parsed.get('foodNutrients', []):
                     id_to_key = {
-                        1257: 'trans_fat', 1258: 'sat_fat', 1253: 'cholesterol',
-                        1093: 'sodium', 1005: 'carbs', 1079: 'fiber',
-                        2000: 'sugars', 1003: 'protein', 1104: 'vit_a',
-                        1162: 'vit_c', 1087: 'calcium', 1089: 'iron',
+                        1257: 'trans_fat',
+                        1258: 'sat_fat',
+                        1253: 'cholesterol',
+                        1093: 'sodium',
+                        1005: 'carbs',
+                        1079: 'fiber',
+                        2000: 'sugars',
+                        1235: 'added_sugars',
+                        1003: 'protein',
+                        1104: 'vit_a',
+                        1162: 'vit_c',
+                        1114: 'vit_d',
+                        1087: 'calcium',
+                        1089: 'iron',
+                        1092: 'potassium',
                         1008: 'energy'
                     }
                     if nutrient['nutrient']['id'] in id_to_key:
@@ -178,6 +189,7 @@ class FoodSearcher:
                 print(f"Error retrieving nutrition data for FDCID {fdcID}: {response.status_code}")
 
         return pd.DataFrame(nutrient_container)
+
     def preprocess_nutrients(self, df):
             """
             Preprocess nutritional data by scaling nutrients to per kcal.

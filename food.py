@@ -45,6 +45,20 @@ if st.button("Generate Labels"):
             st.subheader("📊 Nutrition Data (Raw)")
             st.dataframe(nutrition_df)
 
+    # --- Step 2: Trigger Food Search ---
+    st.subheader("🖼️ Product Images")
+    for idx, row in st.session_state.fdc_results.iterrows():
+        description = row.get("description", "")
+        brand_owner = row.get("brandOwner", "")
+        search_term = f"{description} {brand_owner}".strip()
+
+        image_url = agent.search_images(food=search_term)
+
+        if image_url:
+            st.image(image_url, width=200, caption=description)
+        else:
+            st.warning(f"No image found for: {search_term}")
+
 # --- Step 2: Show Sliders and Nutrition Total ---
 if "nutrition_df" in st.session_state:
     nutrition_df = st.session_state.nutrition_df
@@ -65,6 +79,12 @@ if "nutrition_df" in st.session_state:
     for i, grams in enumerate(ingredient_weights):
         scaled.iloc[i, :-1] *= (grams / 100)
 
-    combined_nutrients = scaled.drop(columns='fdcID').sum().to_dict()
+    # Clean commas from names and join with ', '
+    combined_name = ", ".join(
+        name.replace(",", "") for name in scaled['name'].astype(str)
+    )
+    # Add to nutrient dict
+    combined_nutrients = scaled.drop(columns='fdcID').sum(numeric_only=True).to_dict()
+    combined_nutrients["name"] = combined_name
     st.subheader("🧮 Combined Nutrients (Weighted Total)")
     st.write(combined_nutrients)
