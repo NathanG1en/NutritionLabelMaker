@@ -1,7 +1,158 @@
 import streamlit as st
 import pandas as pd
 from agents.food_search_funcs import FoodSearcher
+from PIL import Image, ImageDraw, ImageFont
 
+
+# Functions
+def load_fonts():
+    try:
+        return {
+            "title": ImageFont.truetype("/System/Library/Fonts/Supplemental/HelveticaNeue.ttc", size=40, index=4),
+            "subheader": ImageFont.truetype("/System/Library/Fonts/Supplemental/Helvetica.ttc", 18),
+            "calories": ImageFont.truetype("/System/Library/Fonts/Supplemental/HelveticaNeue.ttc", size=40, index=4),
+            "bold": ImageFont.truetype("/System/Library/Fonts/Supplemental/Helvetica.ttc", 16),
+            "regular": ImageFont.truetype("/System/Library/Fonts/Supplemental/Helvetica.ttc", 16),
+            "small": ImageFont.truetype("/System/Library/Fonts/Supplemental/Helvetica.ttc", 14),
+        }
+    except:
+        default = ImageFont.load_default()
+        return {k: default for k in ["title", "subheader", "calories", "bold", "regular", "small"]}
+
+# Core function to draw the label
+def draw_nutrition_label(data):
+    width, height = 450, 700
+    image = Image.new('RGB', (width, height), 'white')
+    draw = ImageDraw.Draw(image)
+    fonts = load_fonts()
+    y = 10
+
+    def draw_line(text, bold=False, indent=0, size='normal', right_align_value=None):
+        nonlocal y
+        if size == 'title':
+            font = fonts["title"]
+            spacing = 40
+        elif size == 'subheader':
+            font = fonts["subheader"]
+            spacing = 28
+        elif size == 'calories':
+            font = fonts["calories"]
+            spacing = 50
+        elif size == 'small':
+            font = fonts["small"]
+            spacing = 22
+        else:
+            font = fonts["bold"] if bold else fonts["regular"]
+            spacing = 28
+        draw.text((10 + indent, y), text, font=font, fill='black')
+        if right_align_value:
+            value_font = fonts["bold"] if bold else fonts["regular"]
+            bbox = draw.textbbox((0, 0), right_align_value, font=value_font)
+            w = bbox[2] - bbox[0]  # width = right - left
+            draw.text((width - 10 - w, y), right_align_value, font=value_font, fill='black')
+        y += spacing
+
+    def draw_bar(thickness=5, margin=5):
+        nonlocal y
+        draw.rectangle([0, y, width, y + thickness], fill='black')
+        y += thickness + margin
+
+    # Draw header
+    draw_line("Nutrition Facts", size='title')
+    draw_line(f"{data['servings_per_container']} servings per container")
+    draw_line(f"Serving size     {data['serving_size']}", bold=True)
+    draw_bar(7)
+    draw_line("Amount per serving", size='small')
+    draw_line("Calories", size='calories', bold=True,right_align_value=str(data['calories']) )
+    draw_bar(3)
+
+    draw_line("% Daily Value*", bold=True)
+
+    for nutrient in data["nutrients"]:
+        name = nutrient["name"]
+        amount = nutrient.get("amount", "")
+        dv = nutrient.get("daily_value", "")
+        label = f"{name} {amount}"
+        draw_line(label, bold="Total" in name or "Includes" in name or "Protein" in name, indent=10, right_align_value=dv)
+
+    draw_bar(3)
+
+    # Micronutrients side-by-side
+    micro = data.get("micronutrients", [])
+    for i in range(0, len(micro), 2):
+        left = f"{micro[i]['name']} {micro[i]['amount']} {micro[i].get('daily_value', '')}"
+        right = ""
+        if i + 1 < len(micro):
+            right = f"{micro[i + 1]['name']} {micro[i + 1]['amount']} {micro[i + 1].get('daily_value', '')}"
+        draw_line(f"{left:<24} {right}")
+
+    # Footer
+    for line in data.get("footer", [
+        "* The % Daily Value (DV) tells you how much a nutrient in",
+        "a serving of food contributes to a daily diet. 2,000 calories",
+        "a day is used for general nutrition advice."
+    ]):
+        draw_line(line, size='small')
+
+    return image
+
+def convert_to_nutrition_data(combined_nutrients):
+    # Basic info (use placeholders if needed)
+    nutrition_data = {
+        "servings_per_container": 1,  # You can customize
+        "serving_size": "100g",       # You can customize
+        "calories": combined_nutrients.get("energy", 0),
+        "nutrients": [],
+        "micronutrients": []
+    }
+
+    # Mapping for nicer names (and categorization)
+    macronutrient_map = {
+        "trans_fat": "Trans Fat",
+        "sat_fat": "Saturated Fat",
+        "cholesterol": "Cholesterol",
+        "sodium": "Sodium",
+        "carbs": "Total Carbohydrate",
+        "fiber": "Dietary Fiber",
+        "sugars": "Total Sugars",
+        "added_sugars": "Added Sugars",
+        "protein": "Protein"
+    }
+
+    micronutrient_map = {
+        "vit_a": "Vit. A",
+        "vit_c": "Vit. C",
+        "vit_d": "Vit. D",
+        "calcium": "Calcium",
+        "iron": "Iron",
+        "potassium": "Potas."
+    }
+
+    # Add macronutrients
+    for key, label in macronutrient_map.items():
+        if key in combined_nutrients:
+            value = combined_nutrients[key]
+            nutrition_data["nutrients"].append({
+                "name": label,
+                "amount": f"{round(value, 2)}g" if "fat" in key or key in ["carbs", "fiber", "sugars", "added_sugars", "protein"] else f"{round(value)}mg"
+            })
+
+    # Add micronutrients
+    for key, label in micronutrient_map.items():
+        if key in combined_nutrients:
+            value = combined_nutrients[key]
+            suffix = "mcg" if key in ["vit_a", "vit_d"] else "mg"
+            nutrition_data["micronutrients"].append({
+                "name": label,
+                "amount": f"{round(value, 2)}{suffix}",
+                "daily_value": ""  # Add empty daily value if you don't calculate it
+            })
+
+    return nutrition_data
+
+
+
+# Main
 # App Title
 st.title("🍎 AI-Powered USDA Nutrition Label Generator")
 
@@ -88,3 +239,12 @@ if "nutrition_df" in st.session_state:
     combined_nutrients["name"] = combined_name
     st.subheader("🧮 Combined Nutrients (Weighted Total)")
     st.write(combined_nutrients)
+
+    combined_dict = convert_to_nutrition_data(combined_nutrients)
+    image = draw_nutrition_label(combined_dict)
+    st.image(image, caption="Generated Nutrition Label", use_container_width=True)
+
+
+
+
+
