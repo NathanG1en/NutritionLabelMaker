@@ -138,9 +138,13 @@ class FoodSearcher:
         return pd.DataFrame(results)
 
 
-    def nutrition_retrieval(self, fdcIDs, descriptors = pd.DataFrame(columns = ['description'])):
+    def nutrition_retrieval(self, fdcIDs, descriptors=None):
         """
         Retrieve nutritional data for a list of FDCIDs.
+        
+        Args:
+            fdcIDs: List of FDC IDs
+            descriptors: Optional DataFrame with 'fdcId' and 'description' columns
         """
         nutrient_container = []
         nutrient_list = [
@@ -158,8 +162,17 @@ class FoodSearcher:
                 parsed = response.json()
                 nutrients = {key: 0 for key in nutrient_list}
                 nutrients['fdcID'] = fdcID
-                nutrients['name'] = descriptors['description'][descriptors['fdcId'] == nutrients['fdcID']].iloc[0]
-
+            
+            # Get name from descriptors or from API response
+                if descriptors is not None and not descriptors.empty:
+                    try:
+                        nutrients['name'] = descriptors['description'][descriptors['fdcId'] == fdcID].iloc[0]
+                    except (IndexError, KeyError):
+                        # Fallback to API description
+                        nutrients['name'] = parsed.get('description', f'Food_{fdcID}')
+                else:
+                    # Use description from API response
+                    nutrients['name'] = parsed.get('description', f'Food_{fdcID}')
 
                 for nutrient in parsed.get('foodNutrients', []):
                     id_to_key = {
@@ -182,7 +195,7 @@ class FoodSearcher:
                     }
                     if nutrient['nutrient']['id'] in id_to_key:
                         key = id_to_key[nutrient['nutrient']['id']]
-                        nutrients[key] = nutrient['amount']
+                        nutrients[key] = nutrient.get('amount', 0)
 
                 nutrient_container.append(nutrients)
             else:
@@ -237,6 +250,3 @@ class FoodSearcher:
         print(f"The image: {url}")
 
         return url
-
-
-
