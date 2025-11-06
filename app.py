@@ -1,6 +1,5 @@
 import streamlit as st
-import pandas as pd
-from agents.food_search_funcs import FoodSearcher
+from agents.tools.food_search_funcs import FoodSearcher
 
 
 if __name__ == "__main__":
