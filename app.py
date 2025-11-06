@@ -1,5 +1,5 @@
 import streamlit as st
-from agents.tools.food_search_funcs import FoodSearcher
+from backend.agents.tools.nutrition.food_search_funcs import FoodSearcher
 
 
 if __name__ == "__main__":
