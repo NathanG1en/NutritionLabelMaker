@@ -4,6 +4,7 @@ Run with: uvicorn backend.api.main:app --reload --port 8000
 """
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
@@ -15,6 +16,9 @@ from pathlib import Path
 # Import your existing agent
 from backend.agents.nutrition_agent import NutritionAgent
 
+
+
+
 # ============================================
 # FastAPI Setup
 # ============================================
@@ -24,6 +28,13 @@ app = FastAPI(
     description="AI-powered nutrition label generation API",
     version="1.0.0"
 )
+
+
+# TODO: change this to s3 or supabase or some other image storing service
+# Serve your /mnt/data directory as a static path
+data_dir = Path(__file__).resolve().parent.parent / "data"
+data_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/files", StaticFiles(directory=str(data_dir)), name="files")
 
 # CORS for frontend (React, etc.)
 app.add_middleware(
@@ -85,38 +96,41 @@ async def chat(request: ChatRequest):
     ```
     """
     try:
+        # Run the agent and get its response text
         response = agent.run(request.message, thread_id=request.thread_id)
 
-        # Extract image path if present - try multiple patterns
-        image_path = None
-        
-        # Pattern 1: "file nutrition_labels/Something.png"
-        # Pattern 2: "nutrition_labels/Something.png"
-        # Pattern 3: Just "Something.png"
+        # Try to detect if an image file was generated
+        image_filename = None
         patterns = [
             r'(?:file\s+)?(?:nutrition_labels[/\\])?([A-Za-z0-9_]+_\d{8}_\d{6}\.png)',
             r'(nutrition_labels[/\\][A-Za-z0-9_]+\.png)',
             r'saved to (?:file )?([^\s]+\.png)',
         ]
-        
+
         for pattern in patterns:
             match = re.search(pattern, response)
             if match:
                 potential_path = match.group(1)
-                # Clean up the path - ensure it's just the filename
-                if '/' in potential_path or '\\' in potential_path:
-                    image_path = Path(potential_path).name
-                else:
-                    image_path = potential_path
+                # Normalize just the filename
+                image_filename = Path(potential_path).name
                 break
+
+        # Build the public URL for frontend if an image was created
+        image_url = (
+            f"http://localhost:8000/files/{image_filename}"
+            if image_filename
+            else None
+        )
 
         return ChatResponse(
             response=response,
             thread_id=request.thread_id,
-            image_path=image_path
+            image_path=image_url
         )
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.post("/api/chat/stream")
@@ -185,23 +199,23 @@ async def get_history(thread_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/images/{filename}")
-async def get_image(filename: str):
-    """
-    Serve generated nutrition label images.
-
-    Example: GET /api/images/Avocado_20250205_143022.png
-    """
-    # Look in the nutrition_labels directory
-    image_path = Path("nutrition_labels") / filename
-
-    if not image_path.exists():
-        raise HTTPException(status_code=404, detail=f"Image not found: {filename}")
-
-    if not image_path.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-        raise HTTPException(status_code=400, detail="Invalid image format")
-
-    return FileResponse(image_path, media_type="image/png")
+# @app.get("/api/images/{filename}")
+# async def get_image(filename: str):
+#     """
+#     Serve generated nutrition label images.
+#
+#     Example: GET /api/images/Avocado_20250205_143022.png
+#     """
+#     # Look in the nutrition_labels directory
+#     image_path = Path("nutrition_labels") / filename
+#
+#     if not image_path.exists():
+#         raise HTTPException(status_code=404, detail=f"Image not found: {filename}")
+#
+#     if not image_path.suffix.lower() in ['.png', '.jpg', '.jpeg']:
+#         raise HTTPException(status_code=400, detail="Invalid image format")
+#
+#     return FileResponse(image_path, media_type="image/png")
 
 
 @app.get("/api/tools")
