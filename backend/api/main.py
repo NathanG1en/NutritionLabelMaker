@@ -89,22 +89,51 @@ async def chat(request: ChatRequest):
     try:
         response = agent.run(request.message, thread_id=request.thread_id)
 
-        image_filename = None
-        message_text = response
+        # Normalise response into text so we always have something to show
+        if isinstance(response, (dict, list)):
+            message_text = json.dumps(response)
+        else:
+            message_text = str(response)
 
-        # Try parsing structured JSON from the tool
-        try:
-            parsed = json.loads(response)
+        image_filename = None
+
+        def handle_parsed_payload(parsed):
+            nonlocal image_filename, message_text
+
+            if isinstance(parsed, list) and parsed:
+                parsed = parsed[0]
+
             if isinstance(parsed, dict):
-                image_filename = parsed.get("filename")
-                message_text = parsed.get("message", response)
+                image_filename = parsed.get("filename") or parsed.get("file")
+                if parsed.get("message"):
+                    message_text = parsed["message"]
                 print(f"[DEBUG] Parsed response: {parsed}")
                 print(f"[DEBUG] Extracted image_filename: {image_filename}")
 
-        except json.JSONDecodeError:
-            print("OH HELL NAWAWAW JSON was invalid")
-            # print(f"[DEBUG] JSON  decode error: {str(e)}")
-            print(f"[DEBUG] Offending response: {response}")
+        # Try parsing structured JSON from the tool output
+        if isinstance(response, (dict, list)):
+            handle_parsed_payload(response)
+        elif isinstance(response, str):
+            parsed = None
+            try:
+                parsed = json.loads(response)
+            except json.JSONDecodeError:
+                # Attempt to extract JSON embedded within additional text
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    try:
+                        parsed = json.loads(json_match.group(0))
+                    except json.JSONDecodeError:
+                        print("[DEBUG] Failed to parse embedded JSON payload")
+            except TypeError:
+                # Occurs if response is not JSON-serialisable (shouldn't happen, but be safe)
+                print("[DEBUG] Type error while decoding JSON response")
+
+            if parsed is not None:
+                handle_parsed_payload(parsed)
+            else:
+                print("OH HELL NAWAWAW JSON was invalid")
+                print(f"[DEBUG] Offending response: {response}")
 
         # Build the public URL for the frontend
         image_url = None
