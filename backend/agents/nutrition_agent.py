@@ -42,24 +42,28 @@ class NutritionAgent:
         self.graph = self._build_graph()
 
     def _build_graph(self):
-        """Build the LangGraph workflow."""
-        
-        # Create the graph with proper state annotation
+        """build Langraph workflow"""
         workflow = StateGraph(AgentState)
 
-        # Define the agent node - this is where the LLM decides what to do
         def call_model(state: AgentState):
-            """LLM decides which tool to call based on conversation history."""
             messages = state["messages"]
             response = self.llm_with_tools.invoke(messages)
             return {"messages": [response]}
 
-        # Define tool execution node using ToolNode
+        # Manual wrapper around ToolNode to capture tool outputs
         tool_node = ToolNode(self.tools)
 
-        # Add nodes
+        def run_tools_and_capture(state: AgentState):
+            result = tool_node.invoke(state)
+            for msg in result["messages"]:
+                if isinstance(msg, AIMessage):
+                    tool_output = msg.additional_kwargs.get("tool_output") or msg.content
+                    state["last_tool_output"] = tool_output
+            # leave as-is so LLM can summarize next
+            return result
+
         workflow.add_node("agent", call_model)
-        workflow.add_node("tools", tool_node)
+        workflow.add_node("tools", run_tools_and_capture)
 
         # Define conditional edge - should we use tools or finish?
         def should_continue(state: AgentState):
@@ -87,6 +91,7 @@ class NutritionAgent:
         
         # After tools are executed, go back to the agent
         workflow.add_edge("tools", "agent")
+        # workflow.add_edge("tools", END)
 
         # Compile with memory
         memory = MemorySaver()
@@ -94,31 +99,29 @@ class NutritionAgent:
 
     def run(self, user_query: str, thread_id: str = "default"):
         """
-        Run the agent with a user query.
-        
-        Args:
-            user_query: The user's question or request
-            thread_id: Conversation thread ID for memory persistence
-        
-        Returns:
-            The agent's final response
+        Stream the agent's response.
+         Args:
+              user_query: The user's question or request
+              thread_id: Conversation thread ID for memory persistence
+          Yields:
+               Dict with node name and messages
         """
+
         config = {"configurable": {"thread_id": thread_id}}
-        
-        # Create initial state
-        initial_state = {
-            "messages": [HumanMessage(content=user_query)]
-        }
-        
-        # Run the graph
+        initial_state = {"messages": [HumanMessage(content=user_query)]}
+
         result = self.graph.invoke(initial_state, config)
-        
-        # Return the last AI message content
         messages = result["messages"]
+
+        # If we stored a tool result, prefer that
+        if "last_tool_output" in result:
+            return result["last_tool_output"]
+
+        # Otherwise, fall back to text responses
         for msg in reversed(messages):
-            if isinstance(msg, AIMessage) and not msg.tool_calls:
+            if isinstance(msg, AIMessage) and msg.content:
                 return msg.content
-        
+
         return "No response generated"
 
     def stream(self, user_query: str, thread_id: str = "default"):

@@ -5,6 +5,8 @@ Provides tools for creating, formatting, and rendering nutrition labels.
 
 import json
 import os
+from pathlib import Path
+import traceback
 from datetime import datetime
 from langchain_core.tools import tool
 from backend.agents.tools.label.label_maker import NutritionLabelDrawer
@@ -170,23 +172,37 @@ def create_label_tools():
             
             # Determine save path
             if not save_path:
-                data_dir = os.path.join(os.path.dirname(__file__), "../../../data")
-                os.makedirs(data_dir, exist_ok=True)
+                # Always save directly under backend/data
+                data_dir = Path(__file__).resolve().parents[3] / "data"
+                data_dir.mkdir(parents=True, exist_ok=True)
+
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in food_name)
                 filename = f"{safe_name}_{timestamp}.png"
-                save_path = os.path.join(data_dir, filename)
+                save_path = data_dir / filename
 
             # Save the image
             image.save(save_path)
             abs_path = os.path.abspath(save_path)
-            
-            return f"✅ SUCCESS! Nutrition label image saved to:\n\n📁 {abs_path}\n\nYou can now:\n- Open it with any image viewer\n- Share it\n- Print it\n\nFile size: {os.path.getsize(save_path)} bytes"
-            # return image
-            
+            filename = os.path.basename(abs_path)
+
+            print("[DEBUG] returning JSON from generate_label_image:", {
+                "message": f"The nutrition label image for '{food_name}' has been successfully created.",
+                "filename": filename
+            })
+
+            # Return structured JSON — filename only
+            return json.dumps({
+                "message": f"The nutrition label image for '{food_name}' has been successfully created.",
+                "filename": filename
+            })
+
+
         except json.JSONDecodeError as e:
             return f"Error: Invalid JSON format - {str(e)}"
         except Exception as e:
+            print("[DEBUG] Error generating label image:")
+            traceback.print_exc()
             return f"Error generating label image: {str(e)}"
-    
+
     return [format_nutrition_label, generate_label_image]

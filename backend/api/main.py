@@ -31,10 +31,14 @@ app = FastAPI(
 
 
 # TODO: change this to s3 or supabase or some other image storing service
-# Serve your /mnt/data directory as a static path
+# Define the data folder where images are saved
 data_dir = Path(__file__).resolve().parent.parent / "data"
 data_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/files", StaticFiles(directory=str(data_dir)), name="files")
+
+# Mount static route so /files/... works
+app.mount("/files", StaticFiles(directory=data_dir), name="files")
+
+print(f"[DEBUG] Serving static files from: {data_dir}")
 
 # CORS for frontend (React, etc.)
 app.add_middleware(
@@ -80,57 +84,43 @@ async def root():
         "version": "1.0.0"
     }
 
-
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/chat")
 async def chat(request: ChatRequest):
-    """
-    Send a message to the nutrition agent.
-
-    Example:
-    ```
-    POST /api/chat
-    {
-        "message": "Find avocado and create a nutrition label",
-        "thread_id": "user-123"
-    }
-    ```
-    """
     try:
-        # Run the agent and get its response text
         response = agent.run(request.message, thread_id=request.thread_id)
 
-        # Try to detect if an image file was generated
         image_filename = None
-        patterns = [
-            r'(?:file\s+)?(?:nutrition_labels[/\\])?([A-Za-z0-9_]+_\d{8}_\d{6}\.png)',
-            r'(nutrition_labels[/\\][A-Za-z0-9_]+\.png)',
-            r'saved to (?:file )?([^\s]+\.png)',
-        ]
+        message_text = response
 
-        for pattern in patterns:
-            match = re.search(pattern, response)
-            if match:
-                potential_path = match.group(1)
-                # Normalize just the filename
-                image_filename = Path(potential_path).name
-                break
+        # Try parsing structured JSON from the tool
+        try:
+            parsed = json.loads(response)
+            if isinstance(parsed, dict):
+                image_filename = parsed.get("filename")
+                message_text = parsed.get("message", response)
+                print(f"[DEBUG] Parsed response: {parsed}")
+                print(f"[DEBUG] Extracted image_filename: {image_filename}")
 
-        # Build the public URL for frontend if an image was created
-        image_url = (
-            f"http://localhost:8000/files/{image_filename}"
-            if image_filename
-            else None
-        )
+        except json.JSONDecodeError:
+            print("OH HELL NAWAWAW JSON was invalid")
+            # print(f"[DEBUG] JSON  decode error: {str(e)}")
+            print(f"[DEBUG] Offending response: {response}")
 
+        # Build the public URL for the frontend
+        image_url = None
+        if image_filename:
+            image_url = f"http://localhost:8000/files/{image_filename}"
+            print(f"[DEBUG] Serving image via URL: {image_url}")
+
+        # ✅ Always include image_path in response if available
         return ChatResponse(
-            response=response,
+            response=message_text,
             thread_id=request.thread_id,
             image_path=image_url
         )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @app.post("/api/chat/stream")
