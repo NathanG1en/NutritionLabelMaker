@@ -111,30 +111,40 @@ class NutritionAgent:
             "messages": [HumanMessage(content=user_query)]
         }
 
+        try:
+            state = self.graph.get_state(config)
+            if state:
+                print(f"[DEBUG] Memory found for thread '{thread_id}'")
+                messages = state.values.get("messages", [])
+                print(f"[DEBUG] Message count: {len(messages)}")
+                for i, msg in enumerate(messages[-3:]):  # last few messages
+                    print(f"  [{i}] {msg.__class__.__name__}: {repr(getattr(msg, 'content', ''))[:120]}")
+            else:
+                print(f"[DEBUG] No memory state for thread '{thread_id}'")
+        except Exception as e:
+            print(f"[DEBUG] Could not fetch memory state: {e}")
+
         # Run the graph
         result = self.graph.invoke(initial_state, config)
 
         # Extract messages
         messages = result["messages"]
 
-        print("---------- Debug: All messages in conversation ----------")
-        for i, msg in enumerate(messages):
-            print(f"[{i}] {msg.__class__.__name__}")
-            if hasattr(msg, "content"):
-                print(f"   content: {repr(msg.content)[:200]}")
-            if hasattr(msg, "tool_calls"):
-                print(f"   tool_calls: {msg.tool_calls}")
-        print("----------------------------------------------------------")
 
-        # Step 1: Try to get the last AI message without tool calls
+
+        # Step 1: Prefer structured ToolMessage from generate_label_image
+        for msg in reversed(messages):
+            if msg.__class__.__name__ == "ToolMessage":
+                # Try to see if it's from the image generation tool
+                tool_name = getattr(msg, "name", None)
+                if tool_name == "generate_label_image" or '"filename":' in msg.content:
+                    print("[INFO] Returning ToolMessage content from generate_label_image.")
+                    return msg.content
+
+        # Step 2: Otherwise, get the last AI message without tool calls
         for msg in reversed(messages):
             if isinstance(msg, AIMessage) and not msg.tool_calls:
                 return msg.content
-
-        # Step 2: If no clean AI message, look for tool output
-        for msg in reversed(messages):
-            if msg.__class__.__name__ == "ToolMessage":
-                return msg.content  # This is the tool’s raw JSON or message
 
         # Step 3: Default fallback
         return "No response generated"
