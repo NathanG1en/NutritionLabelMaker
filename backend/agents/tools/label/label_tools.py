@@ -168,22 +168,25 @@ def create_label_tools():
             # Generate the image using NutritionLabelDrawer
             image = label_drawer.draw_vertical_label(label_data)
             
-            # Determine save path
-            if not save_path:
-                data_dir = os.path.join(os.path.dirname(__file__), "../../../data")
-                os.makedirs(data_dir, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in food_name)
-                filename = f"{safe_name}_{timestamp}.png"
-                save_path = os.path.join(data_dir, filename)
+            # Determine save path inside backend/data/labels
+            base_dir = os.path.join(os.path.dirname(__file__), "../../../data/labels")
+            os.makedirs(base_dir, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in food_name)
+            filename = f"{safe_name}_{timestamp}.png"
+            save_path = os.path.join(base_dir, filename)
 
             # Save the image
             image.save(save_path)
-            abs_path = os.path.abspath(save_path)
-            
-            return f"✅ SUCCESS! Nutrition label image saved to:\n\n📁 {abs_path}\n\nYou can now:\n- Open it with any image viewer\n- Share it\n- Print it\n\nFile size: {os.path.getsize(save_path)} bytes"
-            # return image
-            
+
+            # Return just the filename (backend will serve it at /labels/<filename>)
+            return json.dumps({
+                "message": f"✅ Nutrition label image generated for '{food_name}'.",
+                "filename": filename
+            })
+
+
         except json.JSONDecodeError as e:
             return f"Error: Invalid JSON format - {str(e)}"
         except Exception as e:

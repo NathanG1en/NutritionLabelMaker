@@ -26,14 +26,14 @@ class NutritionAgent:
         # Initialize FoodSearcher
         api_key = os.getenv("USDA_KEY", "DEMO_KEY")
         self.food_searcher = FoodSearcher(api_key)
-        
+
         # Create tools using factory functions
         nutrition_tools = create_nutrition_tools(self.food_searcher)
         label_tools = create_label_tools()
-        
+
         # Combine all tools
         self.tools = nutrition_tools + label_tools
-        
+
         # Initialize LLM with tools
         self.llm = ChatOpenAI(model="gpt-4o", temperature=0)
         self.llm_with_tools = self.llm.bind_tools(self.tools)
@@ -43,7 +43,7 @@ class NutritionAgent:
 
     def _build_graph(self):
         """Build the LangGraph workflow."""
-        
+
         # Create the graph with proper state annotation
         workflow = StateGraph(AgentState)
 
@@ -66,11 +66,11 @@ class NutritionAgent:
             """Determine if we should continue to tools or end."""
             messages = state["messages"]
             last_message = messages[-1]
-            
+
             # If the LLM makes a tool call, continue to tools
             if hasattr(last_message, "tool_calls") and last_message.tool_calls:
                 return "tools"
-            
+
             # Otherwise, we're done
             return "end"
 
@@ -84,9 +84,10 @@ class NutritionAgent:
                 "end": END
             }
         )
-        
+
         # After tools are executed, go back to the agent
         workflow.add_edge("tools", "agent")
+        workflow.add_edge("agent", END)
 
         # Compile with memory
         memory = MemorySaver()
@@ -95,49 +96,66 @@ class NutritionAgent:
     def run(self, user_query: str, thread_id: str = "default"):
         """
         Run the agent with a user query.
-        
+
         Args:
             user_query: The user's question or request
             thread_id: Conversation thread ID for memory persistence
-        
+
         Returns:
             The agent's final response
         """
         config = {"configurable": {"thread_id": thread_id}}
-        
+
         # Create initial state
         initial_state = {
             "messages": [HumanMessage(content=user_query)]
         }
-        
+
         # Run the graph
         result = self.graph.invoke(initial_state, config)
-        
-        # Return the last AI message content
+
+        # Extract messages
         messages = result["messages"]
+
+        print("---------- Debug: All messages in conversation ----------")
+        for i, msg in enumerate(messages):
+            print(f"[{i}] {msg.__class__.__name__}")
+            if hasattr(msg, "content"):
+                print(f"   content: {repr(msg.content)[:200]}")
+            if hasattr(msg, "tool_calls"):
+                print(f"   tool_calls: {msg.tool_calls}")
+        print("----------------------------------------------------------")
+
+        # Step 1: Try to get the last AI message without tool calls
         for msg in reversed(messages):
             if isinstance(msg, AIMessage) and not msg.tool_calls:
                 return msg.content
-        
+
+        # Step 2: If no clean AI message, look for tool output
+        for msg in reversed(messages):
+            if msg.__class__.__name__ == "ToolMessage":
+                return msg.content  # This is the tool’s raw JSON or message
+
+        # Step 3: Default fallback
         return "No response generated"
 
     def stream(self, user_query: str, thread_id: str = "default"):
         """
         Stream the agent's response.
-        
+
         Args:
             user_query: The user's question or request
             thread_id: Conversation thread ID for memory persistence
-        
+
         Yields:
             Dict with node name and messages
         """
         config = {"configurable": {"thread_id": thread_id}}
-        
+
         initial_state = {
             "messages": [HumanMessage(content=user_query)]
         }
-        
+
         for event in self.graph.stream(initial_state, config, stream_mode="updates"):
             yield event
 
@@ -151,7 +169,7 @@ class NutritionAgent:
 # Example usage
 if __name__ == "__main__":
     agent = NutritionAgent()
-    
+
     # Example 1: Search and create text label
     print("=" * 70)
     print("Example 1: Search and create formatted text label")
@@ -159,7 +177,7 @@ if __name__ == "__main__":
     response = agent.run("Find 'chicken breast' and create a text nutrition label for it")
     print(response)
     print()
-    
+
     # Example 2: Search and create image label
     print("=" * 70)
     print("Example 2: Search and create label image")
@@ -167,7 +185,7 @@ if __name__ == "__main__":
     response = agent.run("Find 'avocado' and generate a nutrition facts label image")
     print(response)
     print()
-    
+
     # Example 3: Compare foods
     print("=" * 70)
     print("Example 3: Compare protein in foods")

@@ -31,10 +31,18 @@ app = FastAPI(
 
 
 # TODO: change this to s3 or supabase or some other image storing service
-# Serve your /mnt/data directory as a static path
-data_dir = Path(__file__).resolve().parent.parent / "data"
-data_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/files", StaticFiles(directory=str(data_dir)), name="files")
+
+# Base data directory
+base_data_dir = Path(__file__).resolve().parent.parent / "data"
+base_data_dir.mkdir(parents=True, exist_ok=True)
+
+# Dedicated labels directory
+labels_dir = base_data_dir / "labels"
+labels_dir.mkdir(parents=True, exist_ok=True)
+
+# Mount /labels for public access
+app.mount("/labels", StaticFiles(directory=str(labels_dir)), name="labels")
+
 
 # CORS for frontend (React, etc.)
 app.add_middleware(
@@ -96,28 +104,36 @@ async def chat(request: ChatRequest):
     ```
     """
     try:
+        # print sfor debugging purposes.
+        print("\n========== /api/chat ==========")
+        print(f"Incoming message: {request.message}")
+        print(f"Thread ID: {request.thread_id}")
+
         # Run the agent and get its response text
         response = agent.run(request.message, thread_id=request.thread_id)
 
+        print("---------- Raw agent response ----------")
+        print(response[:500])  # prevent console spam
+        print("---------------------------------------")
+
         # Try to detect if an image file was generated
         image_filename = None
-        patterns = [
-            r'(?:file\s+)?(?:nutrition_labels[/\\])?([A-Za-z0-9_]+_\d{8}_\d{6}\.png)',
-            r'(nutrition_labels[/\\][A-Za-z0-9_]+\.png)',
-            r'saved to (?:file )?([^\s]+\.png)',
-        ]
 
-        for pattern in patterns:
-            match = re.search(pattern, response)
-            if match:
-                potential_path = match.group(1)
-                # Normalize just the filename
-                image_filename = Path(potential_path).name
-                break
+        # Detect if tool returned JSON with a filename
+        try:
+            response_data = json.loads(response)
+            if isinstance(response_data, dict) and "filename" in response_data:
+                image_filename = response_data["filename"]
+                response = response_data.get("message", "Label created.")
+        except json.JSONDecodeError as e:
+            # fallback: no JSON
+            print(f"[WARN] Agent response was not JSON-decodable: {e}\nRaw response: {response[:200]}")
+            response = f"{response}\n\n(Note: No structured image data returned — this may be a text-only reply.)"
+
 
         # Build the public URL for frontend if an image was created
         image_url = (
-            f"http://localhost:8000/files/{image_filename}"
+            f"http://localhost:8000/labels/{image_filename}"
             if image_filename
             else None
         )
