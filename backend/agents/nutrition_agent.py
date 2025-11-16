@@ -3,8 +3,15 @@ from typing import Annotated
 from dotenv import load_dotenv
 import operator
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_core.messages import (
+    BaseMessage,
+    AIMessage,
+    HumanMessage,
+    ToolMessage,
+    SystemMessage,
+)
 from langchain_openai import ChatOpenAI
+
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
@@ -16,165 +23,111 @@ from backend.agents.tools.label.label_tools import create_label_tools
 load_dotenv()
 
 
+# ================================================================
+# STATE (messages accumulate)
+# ================================================================
 class AgentState(dict):
-    """State for the nutrition agent with proper message accumulation."""
     messages: Annotated[list[BaseMessage], operator.add]
 
 
+# ================================================================
+# NUTRITION AGENT
+# ================================================================
 class NutritionAgent:
     def __init__(self):
-        # Initialize FoodSearcher
         api_key = os.getenv("USDA_KEY", "DEMO_KEY")
         self.food_searcher = FoodSearcher(api_key)
 
-        # Create tools using factory functions
         nutrition_tools = create_nutrition_tools(self.food_searcher)
         label_tools = create_label_tools()
-
-        # Combine all tools
         self.tools = nutrition_tools + label_tools
 
-        # Initialize LLM with tools
+        # SYSTEM MESSAGE goes here (correct way)
+        self.system_msg = SystemMessage(content="""
+You are a nutrition assistant following ReAct. 
+Think, call tools, observe results, then give a final answer.
+Never repeat a tool call if you already have its result.
+Never hallucinate a tool.
+Never ignore a tool result.
+When comparing foods, call nutrition lookup twice before answering.
+""")
+
         self.llm = ChatOpenAI(model="gpt-4o", temperature=0)
         self.llm_with_tools = self.llm.bind_tools(self.tools)
 
-        # Build the graph
         self.graph = self._build_graph()
 
+    # ================================================================
+    # GRAPH
+    # ================================================================
     def _build_graph(self):
-        """Build the LangGraph workflow."""
-
-        # Create the graph with proper state annotation
         workflow = StateGraph(AgentState)
 
-        # Define the agent node - this is where the LLM decides what to do
-        def call_model(state: AgentState):
-            """LLM decides which tool to call based on conversation history."""
-            messages = state["messages"]
-            response = self.llm_with_tools.invoke(messages)
-            return {"messages": [response]}
+        # ------------------------------------------------------------
+        # LLM CALL NODE
+        # ------------------------------------------------------------
+        def call_llm(state: AgentState):
+            msgs = [self.system_msg] + state["messages"]
+            resp = self.llm_with_tools.invoke(msgs)
+            return {"messages": [resp]}
 
-        # Define tool execution node using ToolNode
+        workflow.add_node("agent", call_llm)
+
+        # ------------------------------------------------------------
+        # TOOL NODE
+        # ------------------------------------------------------------
         tool_node = ToolNode(self.tools)
-
-        # Add nodes
-        workflow.add_node("agent", call_model)
         workflow.add_node("tools", tool_node)
 
-        # Define conditional edge - should we use tools or finish?
-        def should_continue(state: AgentState):
-            """Determine if we should continue to tools or end."""
-            messages = state["messages"]
-            last_message = messages[-1]
-
-            # If the LLM makes a tool call, continue to tools
-            if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        # ------------------------------------------------------------
+        # LOGIC
+        # ------------------------------------------------------------
+        def route(state: AgentState):
+            last = state["messages"][-1]
+            if isinstance(last, AIMessage) and last.tool_calls:
                 return "tools"
-
-            # Otherwise, we're done
             return "end"
 
-        # Set up the flow
         workflow.set_entry_point("agent")
-        workflow.add_conditional_edges(
-            "agent",
-            should_continue,
-            {
-                "tools": "tools",
-                "end": END
-            }
-        )
-
-        # After tools are executed, go back to the agent
+        workflow.add_conditional_edges("agent", route, {"tools": "tools", "end": END})
         workflow.add_edge("tools", "agent")
-        workflow.add_edge("agent", END)
 
-        # Compile with memory
-        memory = MemorySaver()
-        return workflow.compile(checkpointer=memory)
+        return workflow.compile(checkpointer=MemorySaver())
 
+    # ================================================================
+    # RUNTIME
+    # ================================================================
     def run(self, user_query: str, thread_id: str = "default"):
-        """
-        Run the agent with a user query.
-
-        Args:
-            user_query: The user's question or request
-            thread_id: Conversation thread ID for memory persistence
-
-        Returns:
-            The agent's final response
-        """
+        state = {"messages": [HumanMessage(content=user_query)]}
         config = {"configurable": {"thread_id": thread_id}}
 
-        # Create initial state
-        initial_state = {
-            "messages": [HumanMessage(content=user_query)]
-        }
+        result = self.graph.invoke(state, config)
+        msgs = result["messages"]
 
-        try:
-            state = self.graph.get_state(config)
-            if state:
-                print(f"[DEBUG] Memory found for thread '{thread_id}'")
-                messages = state.values.get("messages", [])
-                print(f"[DEBUG] Message count: {len(messages)}")
-                for i, msg in enumerate(messages[-3:]):  # last few messages
-                    print(f"  [{i}] {msg.__class__.__name__}: {repr(getattr(msg, 'content', ''))[:120]}")
-            else:
-                print(f"[DEBUG] No memory state for thread '{thread_id}'")
-        except Exception as e:
-            print(f"[DEBUG] Could not fetch memory state: {e}")
+        last = msgs[-1]
 
-        # Run the graph
-        result = self.graph.invoke(initial_state, config)
+        # If tool output is final, normalize into a dict
+        if isinstance(last, ToolMessage):
+            content = last.content
 
-        # Extract messages
-        messages = result["messages"]
+            # Tool returned structured dict
+            if isinstance(content, dict):
+                return content
 
+            # Tool returned string — wrap it
+            return {"message": str(content), "type": "text"}
 
+        # Otherwise return last AI response
+        for m in reversed(msgs):
+            if isinstance(m, AIMessage) and not getattr(m, "tool_calls", None):
+                return {"message": m.content, "type": "text"}
 
-        # Step 1: Prefer structured ToolMessage from generate_label_image
-        for msg in reversed(messages):
-            if msg.__class__.__name__ == "ToolMessage":
-                # Try to see if it's from the image generation tool
-                tool_name = getattr(msg, "name", None)
-                if tool_name == "generate_label_image" or '"filename":' in msg.content:
-                    print("[INFO] Returning ToolMessage content from generate_label_image.")
-                    return msg.content
+        return {"message": "No response.", "type": "text"}
 
-        # Step 2: Otherwise, get the last AI message without tool calls
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage) and not msg.tool_calls:
-                return msg.content
-
-        # Step 3: Default fallback
-        return "No response generated"
-
-    def stream(self, user_query: str, thread_id: str = "default"):
-        """
-        Stream the agent's response.
-
-        Args:
-            user_query: The user's question or request
-            thread_id: Conversation thread ID for memory persistence
-
-        Yields:
-            Dict with node name and messages
-        """
-        config = {"configurable": {"thread_id": thread_id}}
-
-        initial_state = {
-            "messages": [HumanMessage(content=user_query)]
-        }
-
-        for event in self.graph.stream(initial_state, config, stream_mode="updates"):
-            yield event
-
-    def get_state_history(self, thread_id: str = "default"):
-        """Get the conversation history for a thread."""
+    def get_state_history(self, thread_id="default"):
         config = {"configurable": {"thread_id": thread_id}}
         state = self.graph.get_state(config)
         return state.values.get("messages", [])
-
 
 # Example usage
 if __name__ == "__main__":
@@ -203,3 +156,4 @@ if __name__ == "__main__":
     response = agent.run("Compare the protein content in salmon vs chicken breast")
     print(response)
     print()
+

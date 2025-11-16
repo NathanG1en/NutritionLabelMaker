@@ -20,29 +20,29 @@ def create_label_tools():
     
     # Initialize the label drawer
     label_drawer = NutritionLabelDrawer(width=450, height=1000)
-    
+
     @tool
     def format_nutrition_label(nutrition_data: str, food_name: str) -> str:
         """
         Format nutrition data into a text-based nutrition label.
-        
+
         Args:
-            nutrition_data: JSON string containing nutrition data with keys like 
+            nutrition_data: JSON string containing nutrition data with keys like
                           'energy', 'protein', 'carbs', 'fiber', etc.
             food_name: Name of the food item for the label header
-        
+
         Returns:
             Formatted nutrition label as a string
         """
         try:
             data = json.loads(nutrition_data)
-            
+
             if isinstance(data, list) and len(data) > 0:
                 data = data[0]  # Take first item if list
-            
+
             if isinstance(data, dict) and "error" in data:
                 return f"Cannot create label: {data['error']}"
-            
+
             # Build the label
             label = f"═══════════════════════════════════\n"
             label += f"  Nutrition Facts\n"
@@ -52,7 +52,7 @@ def create_label_tools():
             label += f"───────────────────────────────────\n\n"
             label += f"Amount Per Serving:\n"
             label += f"  Calories ............. {data.get('energy', 0):.0f} kcal\n\n"
-            
+
             label += f"Macronutrients:\n"
             label += f"  Total Fat ............ {data.get('trans_fat', 0) + data.get('sat_fat', 0):.1f}g\n"
             label += f"    Saturated Fat ...... {data.get('sat_fat', 0):.1f}g\n"
@@ -64,7 +64,7 @@ def create_label_tools():
             label += f"    Total Sugars ....... {data.get('sugars', 0):.1f}g\n"
             label += f"    Added Sugars ....... {data.get('added_sugars', 0):.1f}g\n"
             label += f"  Protein .............. {data.get('protein', 0):.1f}g\n\n"
-            
+
             label += f"Vitamins & Minerals:\n"
             label += f"  Vitamin A ............ {data.get('vit_a', 0):.1f}mcg\n"
             label += f"  Vitamin C ............ {data.get('vit_c', 0):.1f}mg\n"
@@ -73,38 +73,30 @@ def create_label_tools():
             label += f"  Iron ................. {data.get('iron', 0):.1f}mg\n"
             label += f"  Potassium ............ {data.get('potassium', 0):.0f}mg\n"
             label += f"═══════════════════════════════════\n"
-            
+
             return label
-            
+
         except json.JSONDecodeError as e:
             return f"Error: Invalid JSON format - {str(e)}"
         except Exception as e:
             return f"Error formatting label: {str(e)}"
 
     @tool
-    def generate_label_image(nutrition_data: str, food_name: str = "Food Item", save_path: str = "") -> str:
+    def generate_label_image(nutrition_data: str, food_name: str = "Food Item") -> dict:
         """
-        Generate a visual FDA-style nutrition facts label image and SAVE it to a file.
-        
-        Args:
-            nutrition_data: JSON string containing nutrition data with keys like 
-                          'energy', 'protein', 'carbs', etc.
-            food_name: Name of the food item (used for filename)
-            save_path: Optional custom path to save the image. If empty, saves to 'nutrition_labels/' folder.
-        
-        Returns:
-            File path where the image was saved, or error message
+        Generate a visual FDA-style nutrition label image and return raw PNG bytes.
+        No local saving. Backend will handle S3 upload.
         """
         try:
             data = json.loads(nutrition_data)
-            
+
             if isinstance(data, list) and len(data) > 0:
                 data = data[0]
-            
+
             if isinstance(data, dict) and "error" in data:
-                return f"Cannot create image: {data['error']}"
-            
-            # Convert nutrition data to label format
+                return {"error": f"Cannot create image: {data['error']}"}
+
+            # Convert nutrition data to structured label format
             label_data = {
                 "servings_per_container": 1,
                 "serving_size": "100g",
@@ -117,8 +109,8 @@ def create_label_tools():
                     "a day is used for general nutrition advice."
                 ]
             }
-            
-            # Map macronutrients
+
+            # Macronutrient mapping
             macronutrient_map = {
                 "trans_fat": "Trans Fat",
                 "sat_fat": "Saturated Fat",
@@ -130,7 +122,7 @@ def create_label_tools():
                 "added_sugars": "Added Sugars",
                 "protein": "Protein"
             }
-            
+
             for key, label in macronutrient_map.items():
                 if key in data:
                     value = data[key]
@@ -138,14 +130,14 @@ def create_label_tools():
                         amount = f"{round(value, 2)}g"
                     else:
                         amount = f"{round(value)}mg"
-                    
+
                     label_data["nutrients"].append({
                         "name": label,
                         "amount": amount,
-                        "daily_value": ""  # Can add %DV calculation later
+                        "daily_value": ""
                     })
-            
-            # Map micronutrients
+
+            # Micronutrient mapping
             micronutrient_map = {
                 "vit_a": "Vit. A",
                 "vit_c": "Vit. C",
@@ -154,7 +146,7 @@ def create_label_tools():
                 "iron": "Iron",
                 "potassium": "Potas."
             }
-            
+
             for key, label in micronutrient_map.items():
                 if key in data:
                     value = data[key]
@@ -164,27 +156,34 @@ def create_label_tools():
                         "amount": f"{round(value, 2)}{suffix}",
                         "daily_value": ""
                     })
-            
-            # Generate the image using NutritionLabelDrawer
+
+            # Render image
             image = label_drawer.draw_vertical_label(label_data)
-            
-            # Determine save path inside backend/data/labels
-            base_dir = os.path.join(os.path.dirname(__file__), "../../../data/labels")
-            os.makedirs(base_dir, exist_ok=True)
 
+            # Convert to PNG bytes
+            import io
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            buffer.seek(0)
+
+            # Clean food name for filename
+            safe_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in food_name)
+            from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in food_name)
             filename = f"{safe_name}_{timestamp}.png"
-            save_path = os.path.join(base_dir, filename)
 
-            # Save the image
-            image.save(save_path)
+            return {
+                "message": f"✓ Nutrition label image generated for '{food_name}'.",
+                "filename": filename,
+                "file_bytes": buffer.getvalue(),
+                "type": "nutrition_label"
+            }
 
-            # Return just the filename (backend will serve it at /labels/<filename>)
-            return json.dumps({
-                "message": f"✅ Nutrition label image generated for '{food_name}'.",
-                "filename": filename
-            })
+        except json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON format: {str(e)}"}
+        except Exception as e:
+            return {"error": f"Error generating label image: {str(e)}"}
+
 
 
         except json.JSONDecodeError as e:

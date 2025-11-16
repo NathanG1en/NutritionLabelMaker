@@ -12,6 +12,9 @@ from typing import Optional
 import json
 import re
 from pathlib import Path
+from backend.utils.s3_client import get_s3
+import uuid
+import os
 
 # Import your existing agent
 from backend.agents.nutrition_agent import NutritionAgent
@@ -79,6 +82,26 @@ class ChatResponse(BaseModel):
 # API Endpoints
 # ============================================
 
+# s3 buckets n stuff
+s3 = get_s3()
+
+def upload_label_to_s3(user_id: str, filename: str, file_bytes: bytes):
+    key = f"{user_id}/labels/{filename}"
+    s3.put_object(
+        Bucket=os.getenv("AWS_BUCKET_NAME"),
+        Key=key,
+        Body=file_bytes,
+        ContentType="image/png"
+    )
+    return s3.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={
+            "Bucket": os.getenv("AWS_BUCKET_NAME"),
+            "Key": key
+        },
+        ExpiresIn=60 * 60 * 24  # 24 hours
+    )
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
@@ -91,61 +114,45 @@ async def root():
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """
-    Send a message to the nutrition agent.
-
-    Example:
-    ```
-    POST /api/chat
-    {
-        "message": "Find avocado and create a nutrition label",
-        "thread_id": "user-123"
-    }
-    ```
-    """
     try:
-        # print sfor debugging purposes.
         print("\n========== /api/chat ==========")
         print(f"Incoming message: {request.message}")
         print(f"Thread ID: {request.thread_id}")
 
-        # Run the agent and get its response text
-        response = agent.run(request.message, thread_id=request.thread_id)
+        response_data = agent.run(request.message, thread_id=request.thread_id)
 
         print("---------- Raw agent response ----------")
-        print(response[:500])  # prevent console spam
+        print(response_data)
         print("---------------------------------------")
 
-        # Try to detect if an image file was generated
-        image_filename = None
+        message_text = response_data.get("message", "")
+        filename = response_data.get("filename")
 
-        # Detect if tool returned JSON with a filename
-        try:
-            response_data = json.loads(response)
-            if isinstance(response_data, dict) and "filename" in response_data:
-                image_filename = response_data["filename"]
-                response = response_data.get("message", "Label created.")
-        except json.JSONDecodeError as e:
-            # fallback: no JSON
-            print(f"[WARN] Agent response was not JSON-decodable: {e}\nRaw response: {response[:200]}")
-            response = f"{response}\n\n(Note: No structured image data returned — this may be a text-only reply.)"
+        print(">>> response_data keys:", response_data.keys())
+        print(">>> filename:", response_data.get("filename"))
+        print(">>> has file_bytes:", "file_bytes" in response_data)
+        print(">>> file_bytes len:", len(response_data["file_bytes"]) if "file_bytes" in response_data else 0)
 
-
-        # Build the public URL for frontend if an image was created
-        image_url = (
-            f"http://localhost:8000/labels/{image_filename}"
-            if image_filename
-            else None
-        )
+        # S3 upload
+        if filename and "file_bytes" in response_data:
+            image_url = upload_label_to_s3(
+                user_id=request.thread_id,
+                filename=filename,
+                file_bytes=response_data["file_bytes"]
+            )
+        else:
+            image_url = None
 
         return ChatResponse(
-            response=response,
+            response=message_text,
             thread_id=request.thread_id,
             image_path=image_url
         )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 
