@@ -49,10 +49,16 @@ Think, call tools, observe results, then give a final answer.
 Never repeat a tool call if you already have its result.
 Never hallucinate a tool.
 Never ignore a tool result.
+Never ignore a tool result.
 When comparing foods, call nutrition lookup twice before answering.
+If the user provides a recipe or multiple ingredients with weights (e.g., "200g chicken, 50g rice"):
+1. Search for each item to get its standard 100g nutrient profile.
+2. Scale the nutrients based on the weight (e.g., 200g = 2.0 * 100g value).
+3. Sum the nutrients to get the total for the recipe.
+4. Use this aggregated data to generate the label or answer.
 """)
 
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
         self.llm_with_tools = self.llm.bind_tools(self.tools)
 
         self.graph = self._build_graph()
@@ -107,7 +113,8 @@ When comparing foods, call nutrition lookup twice before answering.
         # 1. Return the final tool output if it exists
         for m in reversed(msgs):
             if isinstance(m, ToolMessage):
-                return m.content  # dict or string is fine
+                # return m.content  # dict or string is fine
+                pass # Let the LLM interpret the tool output
 
         # 2. Otherwise, return last AI message WITHOUT tool calls
         for m in reversed(msgs):
@@ -128,19 +135,21 @@ When comparing foods, call nutrition lookup twice before answering.
 if __name__ == "__main__":
     agent = NutritionAgent()
 
+    import uuid
+
     # Example 1: Search and create text label
     print("=" * 70)
     print("Example 1: Search and create formatted text label")
     print("=" * 70)
-    response = agent.run("Find 'chicken breast' and create a text nutrition label for it")
+    response = agent.run("Find 'chicken breast' and create a text nutrition label for it", thread_id=str(uuid.uuid4()))
     print(response)
     print()
 
-    # Example 2: Search and create image label
+    # Example 2: Search and create label image
     print("=" * 70)
     print("Example 2: Search and create label image")
     print("=" * 70)
-    response = agent.run("Find 'avocado' and generate a nutrition facts label image")
+    response = agent.run("Find 'avocado' and generate a nutrition facts label image", thread_id=str(uuid.uuid4()))
     print(response)
     print()
 
@@ -148,7 +157,15 @@ if __name__ == "__main__":
     print("=" * 70)
     print("Example 3: Compare protein in foods")
     print("=" * 70)
-    response = agent.run("Compare the protein content in salmon vs chicken breast")
+    response = agent.run("Compare the protein content in salmon vs chicken breast", thread_id=str(uuid.uuid4()))
+    print(response)
+    print()
+
+    # Example 4: Recipe
+    print("=" * 70)
+    print("Example 4: Recipe (Salad)")
+    print("=" * 70)
+    response = agent.run("Create a nutrition label for a salad with 100g spinach, 50g avocado, and 20g olive oil", thread_id=str(uuid.uuid4()))
     print(response)
     print()
 

@@ -58,19 +58,14 @@ def create_nutrition_tools(food_searcher: FoodSearcher):
         try:
             ids_list = [int(id_str.strip()) for id_str in fdc_ids.split(",")]
 
-            nutrition_df = food_searcher.nutrition_retrieval(ids_list)
+            nutrition_data = food_searcher.nutrition_retrieval(ids_list)
 
-            # FIX: handle dict outputs
-            if not nutrition_df or isinstance(nutrition_df, dict):
+            # FIX: handle empty list
+            if not nutrition_data:
                 return json.dumps({"error": "No nutrition data found", "results": []})
 
-            # FIX: support both DataFrame and dict
-            if isinstance(nutrition_df, dict):
-                result = [nutrition_df]
-            else:
-                result = nutrition_df.to_dict(orient="records")
-
-            return json.dumps(result, indent=2)
+            # Return list of dicts directly
+            return json.dumps(nutrition_data, indent=2)
 
         except ValueError as e:
             return json.dumps({"error": f"Invalid FDC ID format: {str(e)}", "results": []})

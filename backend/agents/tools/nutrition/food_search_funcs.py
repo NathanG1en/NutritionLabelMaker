@@ -4,7 +4,8 @@ import os
 import pandas as pd
 from fuzzywuzzy import fuzz
 from sentence_transformers import SentenceTransformer, util
-from fastbook import *
+# from fastbook import * # fastbook is causing hangs
+from duckduckgo_search import DDGS
 
 from fastdownload import download_url
 from fastai.vision.all import *
@@ -201,38 +202,36 @@ class FoodSearcher:
             else:
                 print(f"Error retrieving nutrition data for FDCID {fdcID}: {response.status_code}")
 
-        df = pd.DataFrame(nutrient_container)
+        # Return list of dicts directly
+        if not nutrient_container:
+            return []
 
-        # Always return ONLY the first row with ONLY the fields your LLM needs.
-        if df.empty:
-            return {"error": "No nutrition data found."}
+        # Filter fields for each item
+        filtered_results = []
+        for row in nutrient_container:
+            filtered = {
+                "name": row.get("name"),
+                "energy": row.get("energy"),
+                "protein": row.get("protein"),
+                "carbs": row.get("carbs"),
+                "fiber": row.get("fiber"),
+                "sugars": row.get("sugars"),
+                "added_sugars": row.get("added_sugars"),
+                "sat_fat": row.get("sat_fat"),
+                "trans_fat": row.get("trans_fat"),
+                "cholesterol": row.get("cholesterol"),
+                "sodium": row.get("sodium"),
+                "vit_a": row.get("vit_a"),
+                "vit_c": row.get("vit_c"),
+                "vit_d": row.get("vit_d"),
+                "calcium": row.get("calcium"),
+                "iron": row.get("iron"),
+                "potassium": row.get("potassium"),
+            }
+            filtered_results.append(filtered)
 
-        row = df.iloc[0]
-
-        filtered = {
-            "name": row.get("name"),
-            "energy": row.get("energy"),
-            "protein": row.get("protein"),
-            "carbs": row.get("carbs"),
-            "fiber": row.get("fiber"),
-            "sugars": row.get("sugars"),
-            "added_sugars": row.get("added_sugars"),
-            "sat_fat": row.get("sat_fat"),
-            "trans_fat": row.get("trans_fat"),
-            "cholesterol": row.get("cholesterol"),
-            "sodium": row.get("sodium"),
-            "vit_a": row.get("vit_a"),
-            "vit_c": row.get("vit_c"),
-            "vit_d": row.get("vit_d"),
-            "calcium": row.get("calcium"),
-            "iron": row.get("iron"),
-            "potassium": row.get("potassium"),
-        }
-
-        # THIS is what goes to GPT, not the full DataFrame
-        print(">>> NUTRITION RETRIEVAL OUTPUT:", filtered or df)
-        return filtered
-        # return pd.DataFrame(nutrient_container)
+        print(">>> NUTRITION RETRIEVAL OUTPUT:", filtered_results)
+        return filtered_results
 
     def preprocess_nutrients(self, df):
             """
@@ -276,8 +275,14 @@ class FoodSearcher:
             str: Local path of the first downloaded image.
         """
         print(f"Searching for '{food}'")
-        result = search_images_ddg(f'{food} food', max_images=max_images)
-        url = result[0]
-        print(f"The image: {url}")
-
-        return url
+        # result = search_images_ddg(f'{food} food', max_images=max_images)
+        with DDGS() as ddgs:
+            results = list(ddgs.images(f'{food} food', max_results=max_images))
+        
+        if results:
+            url = results[0]['image']
+            print(f"The image: {url}")
+            return url
+        else:
+            print("No image found")
+            return None
