@@ -56,18 +56,22 @@ def create_nutrition_tools(food_searcher: FoodSearcher):
             JSON string containing nutrition data (calories, protein, vitamins, etc.)
         """
         try:
-            # Parse comma-separated string into list of integers
             ids_list = [int(id_str.strip()) for id_str in fdc_ids.split(",")]
-            
-            # Call nutrition_retrieval WITHOUT descriptors - let it use defaults
+
             nutrition_df = food_searcher.nutrition_retrieval(ids_list)
-            
-            if nutrition_df.empty:
+
+            # FIX: handle dict outputs
+            if not nutrition_df or isinstance(nutrition_df, dict):
                 return json.dumps({"error": "No nutrition data found", "results": []})
-            
-            # Convert to dict for better JSON serialization
-            result = nutrition_df.to_dict(orient="records")
+
+            # FIX: support both DataFrame and dict
+            if isinstance(nutrition_df, dict):
+                result = [nutrition_df]
+            else:
+                result = nutrition_df.to_dict(orient="records")
+
             return json.dumps(result, indent=2)
+
         except ValueError as e:
             return json.dumps({"error": f"Invalid FDC ID format: {str(e)}", "results": []})
         except Exception as e:

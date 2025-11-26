@@ -183,12 +183,5 @@ def create_label_tools():
             return {"error": f"Invalid JSON format: {str(e)}"}
         except Exception as e:
             return {"error": f"Error generating label image: {str(e)}"}
-
-
-
-        except json.JSONDecodeError as e:
-            return f"Error: Invalid JSON format - {str(e)}"
-        except Exception as e:
-            return f"Error generating label image: {str(e)}"
     
     return [format_nutrition_label, generate_label_image]

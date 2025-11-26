@@ -104,23 +104,18 @@ When comparing foods, call nutrition lookup twice before answering.
         result = self.graph.invoke(state, config)
         msgs = result["messages"]
 
-        last = msgs[-1]
-
-        # If tool output is final, normalize into a dict
-        if isinstance(last, ToolMessage):
-            content = last.content
-
-            # Tool returned structured dict
-            if isinstance(content, dict):
-                return content
-
-            # Tool returned string — wrap it
-            return {"message": str(content), "type": "text"}
-
-        # Otherwise return last AI response
+        # 1. Return the final tool output if it exists
         for m in reversed(msgs):
-            if isinstance(m, AIMessage) and not getattr(m, "tool_calls", None):
-                return {"message": m.content, "type": "text"}
+            if isinstance(m, ToolMessage):
+                return m.content  # dict or string is fine
+
+        # 2. Otherwise, return last AI message WITHOUT tool calls
+        for m in reversed(msgs):
+            if isinstance(m, AIMessage) and not m.tool_calls:
+                return {
+                    "message": m.content,
+                    "type": "text"
+                }
 
         return {"message": "No response.", "type": "text"}
 

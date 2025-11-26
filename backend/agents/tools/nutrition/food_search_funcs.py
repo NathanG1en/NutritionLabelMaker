@@ -201,7 +201,38 @@ class FoodSearcher:
             else:
                 print(f"Error retrieving nutrition data for FDCID {fdcID}: {response.status_code}")
 
-        return pd.DataFrame(nutrient_container)
+        df = pd.DataFrame(nutrient_container)
+
+        # Always return ONLY the first row with ONLY the fields your LLM needs.
+        if df.empty:
+            return {"error": "No nutrition data found."}
+
+        row = df.iloc[0]
+
+        filtered = {
+            "name": row.get("name"),
+            "energy": row.get("energy"),
+            "protein": row.get("protein"),
+            "carbs": row.get("carbs"),
+            "fiber": row.get("fiber"),
+            "sugars": row.get("sugars"),
+            "added_sugars": row.get("added_sugars"),
+            "sat_fat": row.get("sat_fat"),
+            "trans_fat": row.get("trans_fat"),
+            "cholesterol": row.get("cholesterol"),
+            "sodium": row.get("sodium"),
+            "vit_a": row.get("vit_a"),
+            "vit_c": row.get("vit_c"),
+            "vit_d": row.get("vit_d"),
+            "calcium": row.get("calcium"),
+            "iron": row.get("iron"),
+            "potassium": row.get("potassium"),
+        }
+
+        # THIS is what goes to GPT, not the full DataFrame
+        print(">>> NUTRITION RETRIEVAL OUTPUT:", filtered or df)
+        return filtered
+        # return pd.DataFrame(nutrient_container)
 
     def preprocess_nutrients(self, df):
             """
